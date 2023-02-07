@@ -1,0 +1,21 @@
+version: 2
+
+registries:
+  pypi-releases:
+    type: python-index
+    url: https://nexus.dataspartan.com/repository/pypi-all/simple
+    username: ${{ secrets.TURINTECH_PYPI_USER }}
+    password: ${{ secrets.TURINTECH_PYPI_PASSWORD }}
+
+updates:
+- package-ecosystem: pip
+  directory: "/setup"
+  insecure-external-code-execution: allow
+  registries:
+    - pypi-releases
+  schedule:
+    interval: daily
+  target-branch: "develop"
+  open-pull-requests-limit: 10
+  commit-message:
+    prefix: chore

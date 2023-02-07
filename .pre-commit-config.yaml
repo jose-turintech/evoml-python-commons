@@ -1,0 +1,14 @@
+# See https://pre-commit.com/ for usage and config
+# just comment to trigger a commit.
+repos:
+- repo: https://github.com/jareyl/conda-env-precommit-hooks
+  rev: 1.0.29
+  hooks:
+  - id: pre-commit-autoupdater
+  - id: isort
+  - id: black
+  - id: flake8
+  - id: mypy
+  - id: pytest
+  - id: pytest-cov
+  - id: conventional-pre-commit

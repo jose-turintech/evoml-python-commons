@@ -1,0 +1,162 @@
+# This workflow will upload a Python Package using Twine when a release is created
+# For more information see: https://help.github.com/en/actions/language-and-framework-guides/using-python-with-github-actions#publishing-to-package-registries
+
+name: Upload Python Package
+
+on:
+  release:
+    types: [published, released, edited]
+
+  workflow_call:
+    secrets:
+      ACTION_APP_ID:
+        required: true
+      ACTION_APP_KEY:
+        required: true
+      PRIVATE_REGISTRY_USERNAME:
+        required: true
+      PRIVATE_REGISTRY_PASSWORD:
+        required: true
+
+env:
+  REPOSITORY_NAME: ${{ github.repository }}
+  TAG_NAME: ${{ github.ref_name }}
+
+jobs:
+  setup-actor:
+    name: Setup environment variables
+    runs-on: ubuntu-18.04
+    concurrency:
+      group: setup-actor.${{ github.head_ref || github.run_id }}.${{ github.event_name }}.${{ matrix.os }}
+      cancel-in-progress: true
+    outputs:
+      actor: ${{ steps.variable.outputs.actor }}
+    steps:
+      - name: Assign environment variable
+        id: variable
+        run: |
+          echo "Github actor variable for the action: ${{ github.actor }}"
+          if [[ "${{github.actor != 'dependabot[bot]'}}" = true ]]; then
+            echo "::set-output name=actor::github"
+            echo "Is github user" 
+          else
+            echo "::set-output name=actor::dependabot[bot]"
+            echo "Is depependabot[bot]"
+          fi
+        shell: bash
+
+  deps-install:
+    needs: [setup-actor]
+    name: Dependency installation
+    strategy:
+      matrix:
+        os: [ ubuntu-18.04 ]
+    runs-on: ${{ matrix.os }}
+    concurrency:
+      group: dep-install-release.${{ github.head_ref || github.run_id }}.${{ github.event_name }}.${{ matrix.os }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          repository: ${{ github.repository }}
+
+      - name: Checkout remote composite actions
+        uses: ./.github/workflows/composite-actions
+        with:
+          ACTION_APP_ID: ${{ secrets.ACTION_APP_ID }}
+          ACTION_APP_KEY: ${{ secrets.ACTION_APP_KEY }}
+
+      - name: install requirements
+        uses: ./.github/actions/code-quality/python/install
+        with:
+          REPOSITORY_NAME: ${{ github.repository }}
+          PYPI_EXTRA_INDEX_URL: https://${{ secrets.PRIVATE_REGISTRY_USERNAME }}:${{ secrets.PRIVATE_REGISTRY_PASSWORD}}@nexus.dataspartan.com/repository/pypi-all/simple
+          REQUIREMENTS_LIST: setup/requirements.txt setup/requirements_develop.txt
+          ACTOR: ${{ needs.setup-actor.outputs.actor }}
+        continue-on-error: false
+
+  build-publish:
+    needs: [deps-install, setup-actor]
+    strategy:
+      matrix:
+        os: [ ubuntu-18.04 ]
+    runs-on: ${{ matrix.os }}
+    concurrency:
+      group: pypi-build-publish.${{ github.head_ref || github.run_id }}.${{ github.event_name }}-${{ matrix.os }}
+      cancel-in-progress: true
+    steps:
+      - name: Check getByTag step result
+        shell: bash
+        run: |
+          echo "****************************************************************************"
+          echo "GITHUB_REF = $GITHUB_REF"
+          echo "tag name is: ${GITHUB_REF##*/}"
+          echo "branch name is: ${{ github.event.release.target_commitish }}"
+          echo "tag name from webhook info is: ${{ github.event.release.tag_name }}"
+          echo "is pre-release: ${{ github.event.release.prerelease }}"
+          echo "****************************************************************************"
+      
+
+      - name: Checkout current repository
+        uses: actions/checkout@v2
+
+      - name: Checkout remote composite actions
+        uses: ./.github/workflows/composite-actions
+        with:
+          ACTION_APP_ID: ${{ secrets.ACTION_APP_ID }}
+          ACTION_APP_KEY: ${{ secrets.ACTION_APP_KEY }}
+
+
+      - name: Process .version pre-release
+        shell: bash
+        if: ${{ github.event.release.prerelease == true }}
+        run: |
+          echo "****************************************************************************"
+          rm ${{ github.workspace }}/setup/.version
+          echo ${{ github.event.release.name }} >> ${{ github.workspace }}/setup/.version
+          echo "tag name is: ${GITHUB_REF##*/}"
+          echo "branch name is: ${{ github.event.release.target_commitish }}"
+          echo "tag name from webhook info is: ${{ github.event.release.tag_name }}"
+          echo "is pre-release: ${{ github.event.release.prerelease }}"
+          echo "release name: ${{ github.event.release.name }} "
+          echo "****************************************************************************"
+
+      - name: Process .version final version
+        shell: bash
+        if: ${{ github.event.release.prerelease == false }}
+        run: |
+          echo "****************************************************************************"
+          rm ${{ github.workspace }}/setup/.version
+          echo ${{ github.event.release.name }} >> ${{ github.workspace }}/setup/.version
+          echo "tag name is: ${GITHUB_REF##*/}"
+          echo "branch name is: ${{ github.event.release.target_commitish }}"
+          echo "tag name from webhook info is: ${{ github.event.release.tag_name }}"
+          echo "is pre-release: ${{ github.event.release.prerelease }}"
+          echo "release name: ${{ github.event.release.name }} "
+          echo "****************************************************************************"
+
+      - name: Wheel build
+        uses: ./.github/actions/code-quality/python/wheel
+        with:
+          ACTOR: ${{ needs.setup-actor.outputs.actor }}
+        continue-on-error: false
+
+      - name: Twine publishing pre-release
+        if: ${{ github.event.release.prerelease == true }}
+        uses: ./.github/actions/code-quality/python/twine
+        with:
+          REGISTRY_URL: https://nexus.dataspartan.com/repository/pypi-snapshot/
+          REGISTRY_USERNAME: ${{ secrets.PRIVATE_REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.PRIVATE_REGISTRY_PASSWORD }}
+        continue-on-error: false
+
+      - name: Twine publishing final release
+        if: ${{ github.event.release.prerelease == false }}
+        uses: ./.github/actions/code-quality/python/twine
+        with:
+          REGISTRY_URL: https://nexus.dataspartan.com/repository/pypi-internal/
+          REGISTRY_USERNAME: ${{ secrets.PRIVATE_REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.PRIVATE_REGISTRY_PASSWORD }}
+        continue-on-error: false

@@ -1,0 +1,31 @@
+name: "Remote Actions Repository"
+description: "Checkout composite actions from the remote repository"
+inputs:
+  ACTION_APP_ID:
+    description: "The repository name with owner details {owner}/{repository}"
+    required: true
+  ACTION_APP_KEY:
+    description: "The github application key that make the authentication"
+    required: true
+outputs:
+  GITHUB_APP_TOKEN:
+    description: "The github application token with access to all repositories"
+    value: ${{ steps.generate_token.outputs.token }}
+runs:
+  using: "composite" # indicates that it's not a full workflow
+  steps:
+    - name: Generate new access token
+      id: generate_token
+      uses: tibdex/github-app-token@v1
+      with:
+        app_id: ${{ inputs.ACTION_APP_ID }}
+        private_key: ${{ inputs.ACTION_APP_KEY }}
+
+    - name: Checkout remote repository
+      uses: actions/checkout@v2
+
+      with:
+        repository: turintech/github-actions
+        token: ${{ steps.generate_token.outputs.token }}
+        path: ./.github/actions
+        ref: feature/python-cache

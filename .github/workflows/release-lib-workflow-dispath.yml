@@ -1,0 +1,147 @@
+name: Manual release (from github).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version for the artifact'
+        required: true
+      is_final:
+        description: 'true or false value, to categorize the release as final or not'
+        required: false
+        default: false
+
+jobs:
+  setup-actor:
+    name: Setup environment variables
+    runs-on: ubuntu-18.04
+    concurrency:
+      group: setup-actor.${{ github.head_ref || github.run_id }}.${{ github.event_name }}.${{ matrix.os }}
+      cancel-in-progress: true
+    outputs:
+      actor: ${{ steps.variable.outputs.actor }}
+    steps:
+      - name: Assign environment variable
+        id: variable
+        run: |
+          echo "Github actor variable for the action: ${{ github.actor }}"
+          if [[ "${{github.actor != 'dependabot[bot]'}}" = true ]]; then
+            echo "::set-output name=actor::github"
+            echo "Is github user" 
+          else
+            echo "::set-output name=actor::dependabot[bot]"
+            echo "Is depependabot[bot]"
+          fi
+        shell: bash
+
+  deps-install:
+    needs: [ setup-actor ]
+    name: Dependency installation
+    strategy:
+      matrix:
+        os: [ ubuntu-18.04 ]
+    runs-on: ${{ matrix.os }}
+    concurrency:
+      group: dep-install.${{ github.head_ref || github.run_id }}.${{ github.event_name }}.${{ matrix.os }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          repository: ${{ github.repository }}
+
+      - name: Checkout remote composite actions
+        uses: ./.github/workflows/composite-actions
+        with:
+          ACTION_APP_ID: ${{ secrets.ACTION_APP_ID }}
+          ACTION_APP_KEY: ${{ secrets.ACTION_APP_KEY }}
+
+      - name: install requirements
+        uses: ./.github/actions/code-quality/python/install
+        with:
+          REPOSITORY_NAME: ${{ github.repository }}
+          PYPI_EXTRA_INDEX_URL: https://${{ secrets.PRIVATE_REGISTRY_USERNAME }}:${{ secrets.PRIVATE_REGISTRY_PASSWORD}}@nexus.dataspartan.com/repository/pypi-all/simple
+          REQUIREMENTS_LIST: setup/requirements.txt setup/requirements_develop.txt
+          ACTOR: ${{ needs.setup-actor.outputs.actor }}
+        continue-on-error: false
+
+  build-publish:
+    needs: [deps-install, setup-actor]
+    strategy:
+      matrix:
+        os: [ ubuntu-18.04 ]
+    runs-on: ${{ matrix.os }}
+    concurrency:
+      group: release-build-publish.${{ github.head_ref || github.run_id }}.${{ github.event_name }}.${{ matrix.os }}
+      cancel-in-progress: true
+    steps:
+      - name: Check getByTag step result
+        shell: bash
+        run: |
+          echo "****************************************************************************"
+          echo "GITHUB_REF = $GITHUB_REF"
+          echo "tag name is: ${GITHUB_REF##*/}"
+          echo "is final release: ${{ github.event.inputs.is_final }}"
+          echo "****************************************************************************"
+      
+
+      - name: Checkout current repository
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Checkout remote composite actions
+        uses: ./.github/workflows/composite-actions
+        with:
+          ACTION_APP_ID: ${{ secrets.ACTION_APP_ID }}
+          ACTION_APP_KEY: ${{ secrets.ACTION_APP_KEY }}
+
+
+      - name: Process .version pre-release
+        shell: bash
+        if: ${{ github.event.inputs.is_final != true }}
+        run: |
+          echo "****************************************************************************"
+          rm ${{ github.workspace }}/setup/.version
+          echo ${{ github.event.inputs.version }} >> ${{ github.workspace }}/setup/.version
+          echo "tag name is: ${GITHUB_REF##*/}"
+          echo "is final release: ${{ github.event.inputs.is_final }}"
+          echo "****************************************************************************"
+
+      - name: Process .version final version
+        shell: bash
+        if: ${{ github.event.insputs.is_final == true }}
+        run: |
+          echo "****************************************************************************"
+          rm ${{ github.workspace }}/setup/.version
+          echo ${{ github.event.inputs.version }} >> ${{ github.workspace }}/setup/.version
+          echo "tag name is: ${GITHUB_REF##*/}"
+          echo "is final release: ${{ github.event.inputs.is_final }}"
+          echo "****************************************************************************"
+
+        {% raw -%}
+      - name: {% if cookiecutter.wheel_as_binary.lower()=="true" %}Nuitka{% else %}Wheel{% endif %} build
+        uses: ./.github/actions/code-quality/python/{% if cookiecutter.wheel_as_binary.lower()=="true" %}{% else %}wheel{% endif %}
+        {% raw -%}
+        with:
+          ACTOR: ${{ needs.setup-actor.outputs.actor }}
+        continue-on-error: false
+
+      - name: Twine publishing pre-release
+        if: ${{ github.event.insputs.is_final != true }}
+        uses: ./.github/actions/code-quality/python/twine
+        with:
+          REGISTRY_URL: https://nexus.dataspartan.com/repository/pypi-snapshot/
+          REGISTRY_USERNAME: ${{ secrets.PRIVATE_REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.PRIVATE_REGISTRY_PASSWORD }}
+        continue-on-error: false
+
+      - name: Twine publishing final release
+        if: ${{ github.event.insputs.is_final == true }}
+        uses: ./.github/actions/code-quality/python/twine
+        with:
+          REGISTRY_URL: https://nexus.dataspartan.com/repository/pypi-internal/
+          REGISTRY_USERNAME: ${{ secrets.PRIVATE_REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.PRIVATE_REGISTRY_PASSWORD }}
+        continue-on-error: false

@@ -1,0 +1,72 @@
+# Requirements only for development (upload library to Nexus, testing, code style, ...)
+#   python_version: 3.8
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+# --------------------------------------------------------------------------------------------------------------------
+# --- Utilities
+# --------------------------------------------------------------------------------------------------------------------
+
+# Command line utility to show dependency tree of packages
+pipdeptree==2.2.1
+
+# --------------------------------------------------------------------------------------------------------------------
+# --- Code Style Tools:
+# --------------------------------------------------------------------------------------------------------------------
+
+# Tool for catch errors and ensure that the code is idiomatic Python (ie PEP8)
+flake8==4.0.1
+
+# Google tool for finding bugs and style problems in Python source code.
+# also suggests avoiding some tricky-but-useful features
+pylint==2.13.5
+
+# Mypy has a powerful type system with features such as type inference,
+# gradual typing, generics and union types.
+mypy==0.942
+
+# Black applyies automatic formatting to the codebase
+black==22.3.0
+
+# --------------------------------------------------------------------------------------------------------------------
+# --- Testing:
+# --------------------------------------------------------------------------------------------------------------------
+
+# Framework to write small tests, yet scales to support complex functional testing for applications and libraries.
+pytest==7.1.1
+
+# Pytest plugin for measuring coverage.
+pytest-cov==3.0.0
+
+# Pytest plugin for paralell execution
+pytest-xdist==2.5.0
+
+# Pytest pluging in order to split test execution
+pytest-split==0.7.0
+
+# --------------------------------------------------------------------------------------------------------------------
+# --- Documentation:
+# --------------------------------------------------------------------------------------------------------------------
+
+#Generate the documentation for the project from code comments.
+sphinx==4.5.0
+
+# --------------------------------------------------------------------------------------------------------------------
+# --- Build library
+# --------------------------------------------------------------------------------------------------------------------
+
+# Utility for packaging python artifacts into wheel format.
+wheel==0.37.1
+
+# --------------------------------------------------------------------------------------------------------------------
+# Uploading PyPI Package to Nexus
+# --------------------------------------------------------------------------------------------------------------------
+
+# Client tool to upload them to a hosted repository on the repository manager
+twine==3.8.0
+
+# --------------------------------------------------------------------------------------------------------------------
+# Management of commit hooks.
+# --------------------------------------------------------------------------------------------------------------------
+
+# A framework for managing and maintaining multi-language pre-commit hooks.
+pre-commit==2.17.0

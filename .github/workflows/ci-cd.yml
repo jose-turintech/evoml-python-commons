@@ -1,0 +1,53 @@
+# CI/CD
+# ---------------------------------------------
+# This Github action is responsible for the CI/CD processes of this repository.
+# 1. It undertakes to build and deploy the latest state of the "develop"
+# branch to the development server.
+# 2. It is responsible to keep synced the production environment with
+# the latest release (AKA git tag).
+#
+# When: On every push at develop branch, OR on every pushed git tag
+# External Dependencies: turintech/github-actions
+# Concurrency: Ensures that only a single job or workflow using the same concurrency
+# group will run at a time. A concurrency group can be any string or expression
+
+name: CI/CD
+
+on:
+  push:
+    branches:
+      - develop
+      - master
+      - main
+
+    paths-ignore:
+      - "**.md"
+      - "**.yml"
+      - "CODEOWNERS"
+    tags:
+      - "**"
+
+concurrency:
+  group: ${{ github.ref_type }}
+  cancel-in-progress: true
+
+env:
+  REPOSITORY_NAME: ${{ github.repository }}
+  TAG_NAME: ${{ github.ref_name }}
+
+# Conventional commits and format checks are the first steps of the workflow, since they do not need to install
+# any additional requirements (format checking, installs itself black having minimum impact in time performance).defaults:
+# Then the execution of tests, type checks and lint checks is done (this three steps, need the installation of
+# setup/requirements.txt and setup/requirements_develop.txt in order to run).defaults:
+# Finally, if all the steps pass correctly (and only on push), the sonarqube code analysis is executed.
+jobs:
+  code-quality:
+    name: Code quality workflow
+    uses: turintech/evoml-python-commons/.github/workflows/code-quality.yml@develop
+    secrets:
+      ACTION_APP_ID: ${{ secrets.ACTION_APP_ID }}
+      ACTION_APP_KEY: ${{ secrets.ACTION_APP_KEY }}
+      PRIVATE_REGISTRY_USERNAME: ${{ secrets.PRIVATE_REGISTRY_USERNAME }}
+      PRIVATE_REGISTRY_PASSWORD: ${{ secrets.PRIVATE_REGISTRY_PASSWORD}}
+      SONARQUBE_HOST: ${{ secrets.SONARQUBE_HOST }}
+      SONARQUBE_TOKEN: ${{ secrets.SONARQUBE_TOKEN }}

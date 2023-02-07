@@ -1,0 +1,13 @@
+# Necessary requirements for library package
+#   python_version: 3.8
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+# --------------------------------------------------------------------------------------------------------------------
+# --- Configuration:
+# --------------------------------------------------------------------------------------------------------------------
+
+# Data validation and settings management using Python type hinting.
+pydantic[dotenv]
+
+# Python logging made (stupidly) simple. Loguru is a library which aims to bring enjoyable logging in Python.
+loguru

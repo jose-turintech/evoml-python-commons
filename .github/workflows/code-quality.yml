@@ -1,0 +1,310 @@
+# Code quality checks
+# ---------------------------------------------
+# This Github action is responsible for the code quality processes on this repository.
+# 1. It performs:
+# 1.1 Conventional commit checks
+# 1.2 Code format checks
+# 1.3 Lint checks
+# 1.4 Type checks
+# 1.5 Library build
+# 1.6 Library publishing into Pypi
+#
+# When: On every pull request and called from the CI/CD workflow on any push for develop/master/main brainch
+# and any tag push to the repo.
+# External Dependencies: turintech/github-actions
+
+name: Code quality
+on:
+  pull_request:
+    branches: [ develop, master, main ]
+    paths-ignore:
+      - "**.md"
+      - "**.yml"
+      - "CODEOWNERS"
+
+
+  workflow_call:
+    secrets:
+      ACTION_APP_ID:
+        required: true
+      ACTION_APP_KEY:
+        required: true
+      PRIVATE_REGISTRY_USERNAME:
+        required: true
+      PRIVATE_REGISTRY_PASSWORD:
+        required: true
+      SONARQUBE_HOST:
+        required: true
+      SONARQUBE_TOKEN:
+        required: true
+
+env:
+  REPOSITORY_NAME: ${{ github.repository }}
+  TAG_NAME: ${{ github.ref_name }}
+
+# Conventional commits and format checks are the first steps of the workflow, since they do not need to install
+# any additional requirements (format checking, installs itself black having minimum impact in time performance).defaults:
+# Then the execution of tests, type checks and lint checks is done (this three steps, need the installation of
+# setup/requirements.txt and setup/requirements_develop.txt in order to run).defaults:
+# Finally, if all the steps pass correctly (and only on push), the sonarqube code analysis is executed.
+jobs:
+  setup-actor:
+    name: Setup environment variables
+    runs-on: ubuntu-18.04
+    concurrency:
+      group: setup-actor.${{ github.head_ref || github.run_id }}.${{ github.event_name }}.${{ matrix.os }}
+      cancel-in-progress: true
+    outputs:
+      actor: ${{ steps.variable.outputs.actor }}
+    steps:
+      - name: Assign environment variable
+        id: variable
+        run: |
+          echo "Github actor variable for the action: ${{ github.actor }}"
+          if [[ "${{github.actor != 'dependabot[bot]'}}" = true ]]; then
+            echo "::set-output name=actor::github"
+            echo "Is github user" 
+          else
+            echo "::set-output name=actor::dependabot[bot]"
+            echo "Is depependabot[bot]"
+          fi
+        shell: bash
+
+  conventional-commit:
+    if: ${{ needs.actor-setup.outputs.actor != 'dependabot[bot]' }}
+    needs: [setup-actor]
+    name: Conventional Commits
+    runs-on: ubuntu-18.04
+    concurrency:
+      group: conv-commmit.${{ github.head_ref || github.run_id }}.${{ github.event_name }}.${{ matrix.os }}.${{ needs.setup-actor.outputs.actor }}
+      cancel-in-progress: true
+    steps:
+      - name: Check getByTag step result
+        shell: bash
+        run: |
+              echo "****************************************************************************"
+              echo "GITHUB_REF = $GITHUB_REF"
+              echo "tag name is: ${GITHUB_REF##*/}"
+              echo "ACTOR CUSTOM VARIABLE: ${{ needs.setup-actor.outputs.actor }}"
+              echo "Repository: ${{ github.repository }}"
+              echo "Ref: ${{ github.ref }}"
+              echo "Ref head sha: ${{ github.event.pull_request.head.sha }}"
+              echo "****************************************************************************"
+      - uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: webiny/action-conventional-commits@v1.0.3
+
+  deps-install:
+    if: ${{ needs.actor-setup.outputs.actor != 'dependabot[bot]' }}
+    needs: [conventional-commit, setup-actor]
+    name: Dependency installation
+    strategy:
+      matrix:
+        os: [ ubuntu-18.04 ]
+    runs-on: ${{ matrix.os }}
+    concurrency:
+      group: dep-install.${{github.head_ref||github.run_id}}.${{ github.event_name }}.${{ matrix.os }}.${{ needs.setup-actor.outputs.actor }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          repository: ${{ github.repository }}
+
+      - name: Checkout remote composite actions
+        uses: ./.github/workflows/composite-actions
+        with:
+          ACTION_APP_ID: ${{ secrets.ACTION_APP_ID }}
+          ACTION_APP_KEY: ${{ secrets.ACTION_APP_KEY }}
+
+      - name: install requirements
+        uses: ./.github/actions/code-quality/python/install
+        with:
+          REPOSITORY_NAME: ${{ github.repository }}
+          PYPI_EXTRA_INDEX_URL: https://${{ secrets.PRIVATE_REGISTRY_USERNAME }}:${{ secrets.PRIVATE_REGISTRY_PASSWORD}}@nexus.dataspartan.com/repository/pypi-all/simple
+          REQUIREMENTS_LIST: setup/requirements.txt setup/requirements_develop.txt
+          ACTOR: ${{ needs.setup-actor.outputs.actor }}
+        continue-on-error: false
+
+  lint-check:
+    if: ${{ needs.actor-setup.outputs.actor != 'dependabot[bot]' }}
+    needs: [deps-install, setup-actor]
+    name: Lint checks
+    runs-on: ubuntu-18.04
+    concurrency:
+      group: lint-checks.${{ github.head_ref || github.run_id}}.${{ github.event_name }}.${{ needs.setup-actor.outputs.actor }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          repository: ${{ github.repository }}
+
+      - name: Checkout remote composite actions
+        uses: ./.github/workflows/composite-actions
+        with:
+          ACTION_APP_ID: ${{ secrets.ACTION_APP_ID }}
+          ACTION_APP_KEY: ${{ secrets.ACTION_APP_KEY }}
+
+      - name: Check code quality
+        uses: ./.github/actions/code-quality/python/lint
+        with:
+          REPOSITORY_NAME: ${{ github.repository }}
+          ACTOR: ${{ needs.setup-actor.outputs.actor }}
+        continue-on-error: true
+
+  format-check:
+    if: ${{ needs.actor-setup.outputs.actor != 'dependabot[bot]' }}
+    needs: [ deps-install, setup-actor ]
+    name: Format checks
+    runs-on: ubuntu-18.04
+    concurrency:
+      group: format-checks.${{ github.head_ref || github.run_id }}.${{ github.event_name }}.${{ needs.setup-actor.outputs.actor }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          repository: ${{ github.repository }}
+
+      - name: code formatting checks
+        uses: psf/black@stable
+        with:
+          options: "--check --diff --verbose"
+          src: "src/ tests/"
+          version: "22.3.0"
+        continue-on-error: true
+
+  type-check:
+    if: ${{ needs.actor-setup.outputs.actor != 'dependabot[bot]' }}
+    name: Type check
+    needs: [ deps-install, setup-actor ]
+    runs-on: ubuntu-18.04
+    concurrency:
+      group: type-checks.${{ github.head_ref || github.run_id }}.${{ github.event_name }}.${{ needs.setup-actor.outputs.actor }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Checkout remote composite actions
+        uses: ./.github/workflows/composite-actions
+        with:
+          ACTION_APP_ID: ${{ secrets.ACTION_APP_ID }}
+          ACTION_APP_KEY: ${{ secrets.ACTION_APP_KEY }}
+
+      - name: Type check
+        uses: ./.github/actions/code-quality/python/type
+        with:
+          REPOSITORY_NAME: ${{ github.repository }}
+          ACTOR: ${{ needs.setup-actor.outputs.actor }}
+        continue-on-error: true
+
+  unit-tests:
+    if: ${{ needs.actor-setup.outputs.actor != 'dependabot[bot]' }}
+    name: Unit Tests
+    needs: [ deps-install, setup-actor, type-check, format-check, lint-check ]
+    runs-on: ubuntu-18.04
+    strategy:
+      matrix:
+        group: [1]
+    concurrency:
+      group: unit-tests.${{ github.head_ref || github.run_id}}.${{ github.event_name }}.${{matrix.os}}.${{ matrix.group }}.${{ needs.setup-actor.outputs.actor }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Checkout remote composite actions
+        uses: ./.github/workflows/composite-actions
+        with:
+          ACTION_APP_ID: ${{ secrets.ACTION_APP_ID }}
+          ACTION_APP_KEY: ${{ secrets.ACTION_APP_KEY }}
+
+      - name: Test execution and coverage upload
+        uses: ./.github/actions/code-quality/python/test
+        with:
+          REPOSITORY_NAME: ${{ github.repository }}
+          NUMBER_OF_JOBS: ${{ strategy.job-total }}
+          CURRENT_GROUP: ${{ matrix.group }}
+          ACTOR: ${{ needs.setup-actor.outputs.actor }}
+        continue-on-error: false
+
+  artifact-build:
+    if: ${{ needs.actor-setup.outputs.actor != 'dependabot[bot]' }}
+    needs: [unit-tests, setup-actor]
+    strategy:
+      matrix:
+        os: [ ubuntu-18.04 ]
+    runs-on: ${{ matrix.os }}
+    concurrency:
+      group: artifact-build.${{ github.head_ref || github.run_id }}.${{ github.event_name }}.${{ matrix.os }}.${{ needs.setup-actor.outputs.actor }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Checkout remote composite actions
+        uses: ./.github/workflows/composite-actions
+        with:
+          ACTION_APP_ID: ${{ secrets.ACTION_APP_ID }}
+          ACTION_APP_KEY: ${{ secrets.ACTION_APP_KEY }}
+
+      - name: Wheel build
+        uses: ./.github/actions/code-quality/python/wheel
+        with:
+          ACTOR: ${{ needs.setup-actor.outputs.actor }}
+        continue-on-error: false
+
+      - name: Twine publishing
+        if: github.event_name == 'push'
+        uses: ./.github/actions/code-quality/python/twine
+        with:
+          REGISTRY_URL: https://nexus.dataspartan.com/repository/pypi-snapshot/
+          REGISTRY_USERNAME: ${{ secrets.PRIVATE_REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.PRIVATE_REGISTRY_PASSWORD }}
+          ACTOR: ${{ needs.setup-actor.outputs.actor }}
+        continue-on-error: false
+
+  # Sonarqube analysis gets executed only on push to master/develop
+  sonarqube-code-analysis:
+    if: github.event_name == 'push' && ! startsWith(github.ref, 'refs/tags/')
+    needs: [ unit-tests ]
+    runs-on: ubuntu-18.04
+    concurrency:
+      group: sonarqube-checks.${{ github.head_ref || github.run_id }}.${{ github.event_name }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Checkout remote composite actions
+        uses: ./.github/workflows/composite-actions
+        with:
+          ACTION_APP_ID: ${{ secrets.ACTION_APP_ID }}
+          ACTION_APP_KEY: ${{ secrets.ACTION_APP_KEY }}
+
+      - name: Sonarqube code analysis
+        uses: ./.github/actions/code-analysis/python
+        with:
+          REPOSITORY_NAME: ${{ github.repository }}
+          TAG_NAME: ${{ github.ref_name }}
+          SRC_FOLDER_PATH: src/
+          ACTION_APP_ID: ${{ secrets.ACTION_APP_ID }}
+          ACTION_APP_KEY: ${{ secrets.ACTION_APP_KEY }}
+          SONARQUBE_HOST: ${{ secrets.SONARQUBE_HOST }}
+          SONARQUBE_TOKEN: ${{ secrets.SONARQUBE_TOKEN }}
+        continue-on-error: true
